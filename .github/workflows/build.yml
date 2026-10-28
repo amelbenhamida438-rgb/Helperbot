@@ -1,0 +1,123 @@
+name: Build Helper Bot
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Write project files
+        run: |
+          mkdir -p proj && cd proj
+          cat > build.gradle << 'EOF_0'
+          plugins {
+              id 'fabric-loom' version '1.14-SNAPSHOT'
+          }
+          version = "1.0.0"
+          base { archivesName = "helperbot" }
+          repositories {}
+          dependencies {
+              minecraft "com.mojang:minecraft:1.21.11"
+              mappings "net.fabricmc:yarn:1.21.11+build.4:v2"
+              modImplementation "net.fabricmc:fabric-loader:0.18.4"
+              modImplementation "net.fabricmc.fabric-api:fabric-api:0.141.1+1.21.11"
+          }
+          tasks.withType(JavaCompile).configureEach {
+              options.release = 21
+              options.encoding = "UTF-8"
+          }
+          java {
+              sourceCompatibility = JavaVersion.VERSION_21
+              targetCompatibility = JavaVersion.VERSION_21
+          }
+          processResources {
+              inputs.property "version", project.version
+              filesMatching("fabric.mod.json") { expand "version": project.version }
+          }
+          EOF_0
+          cat > settings.gradle << 'EOF_1'
+          pluginManagement {
+              repositories {
+                  maven { url = 'https://maven.fabricmc.net/' }
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          rootProject.name = 'helperbot'
+          EOF_1
+          cat > gradle.properties << 'EOF_2'
+          org.gradle.jvmargs=-Xmx2G
+          EOF_2
+          mkdir -p src/main/resources
+          cat > src/main/resources/fabric.mod.json << 'EOF_3'
+          {
+            "schemaVersion": 1,
+            "id": "helperbot",
+            "version": "${version}",
+            "name": "Helper Bot",
+            "description": "A helper bot that follows you, fights, collects items and chats.",
+            "environment": "*",
+            "entrypoints": { "main": ["helperbot.HelperBot"] },
+            "depends": {
+              "fabricloader": ">=0.18.0",
+              "minecraft": "~1.21.11",
+              "java": ">=21",
+              "fabric-api": "*"
+            }
+          }
+          EOF_3
+          mkdir -p src/main/java/helperbot
+          cat > src/main/java/helperbot/HelperBot.java << 'EOF_4'
+          package helperbot;
+
+          import net.fabricmc.api.ModInitializer;
+          import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+          import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+          import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
+          import net.minecraft.entity.EntityType;
+          import net.minecraft.entity.ItemEntity;
+          import net.minecraft.entity.SpawnReason;
+          import net.minecraft.server.world.ServerWorld;
+          import net.minecraft.entity.passive.IronGolemEntity;
+          import net.minecraft.server.command.CommandManager;
+          import net.minecraft.server.network.ServerPlayerEntity;
+          import net.minecraft.text.Text;
+
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.UUID;
+
+          public class HelperBot implements ModInitializer {
+
+              static String tag(UUID id) {
+                  return "helperbot_" + id;
+              }
+
+              static List<IronGolemEntity> bots(ServerPlayerEntity p) {
+                  String t = tag(p.getUuid());
+                  return new ArrayList<>(world(p).getEntitiesByType(EntityType.IRON_GOLEM, g -> g.getCommandTags().contains(t)));
+              }
+
+              static ServerWorld world(ServerPlayerEntity p) {
+                  return (ServerWorld) p.getEntityWorld();
+              }
+
+              static void say(ServerPlayerEntity to, String msg) {
+                  world(to).getServer().getPlayerManager().broadcast(Text.literal("\u00a7b<\u0645\u0633\u0627\u0639\u062f>\u00a7r " + msg), false);
+              }
+
+              @Override
+              public void onInitialize() {
+                  // /bot : spawn your helper
+                  CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                      dispatcher.register(CommandManager.literal("bot").executes(ctx -> {
+                          ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
+                          if (!bots(p).isEmpty()) {
+                              p.sendMessage(Text.literal("\u0644\u062f\u064a\u0643 \u0645\u0633\u0627\u0639\u062f \u0628\u0627\u0644\u0641\u0639\u0644!"), false);
+                              return 0;
+                          }
+                          IronGolemEntity g = EntityType.IRON_GOLEM.create(world(p), SpawnReason.COMMAND);
